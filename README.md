@@ -1,0 +1,104 @@
+# ApexOS Base Images
+
+These base images are designed as Docker base images for use with building ApexOS containers and add-ons.
+It is recommended to use these as a base for your own ApexOS Add-ons.
+
+Using these images as a base for other Docker projects is, however, not recommended.
+
+The image include [S6-Overlay](https://github.com/just-containers/s6-overlay), [Bashio](https://github.com/apexinfosysindia/bashio) and [TempIO](https://github.com/apexinfosysindia/tempio).
+
+## Supported architectures
+
+Images are built for all platforms officially supported by ApexOS, which are `amd64` and `arm64`.
+
+Beginning with the 2026.03.1 release, all images are published as multi-arch images for these platforms. The old architecture-prefixed images (`aarch64-*`, `amd64-*`) are still available but preferably the multi-arch images should be used.
+
+## Base images
+
+We support versions that are not EOL: https://alpinelinux.org/releases/
+
+| Image | OS | Tags | latest |
+|-------|----|------|--------|
+| base | Alpine | 3.22, 3.23, 3.24 | 3.24 |
+
+### jemalloc
+
+We support on our platforms jemalloc. On the application which you want to enable it, set as environment `LD_PRELOAD="/usr/local/lib/libjemalloc.so.2"` on your Dockerfile or before you start the application.
+
+### Python images
+
+We support the latest 3 releases with the latest 3 Alpine versions.
+
+| Image | OS | Python versions | Tags | latest |
+|-------|----|-----------------|------|--------|
+| base-python | Alpine | 3.12, 3.13, 3.14 | 3.12-alpine3.22, 3.12-alpine3.23, 3.12-alpine3.24, 3.13-alpine3.22, 3.13-alpine3.23, 3.13-alpine3.24, 3.14-alpine3.22, 3.14-alpine3.23, 3.14-alpine3.24 | 3.14-alpine3.24 |
+
+## Others
+
+### Debian images
+
+**Note**: We prefer the Alpine based version because it's more IoT friendly. In some case, you need a glibc system like this.
+
+| Image | OS | Tags | latest |
+|-------|----|------|--------|
+| base-debian | Debian | bookworm, trixie | trixie |
+
+### Ubuntu images
+
+**Note**: We prefer the alpine based version because it's more IoT friendly. In some case, you need a glibc system like this.
+
+| Image | OS | Tags | latest |
+|-------|----|------|--------|
+| base-ubuntu | Ubuntu | 22.04, 24.04, 26.04 | 26.04 |
+
+## Building images locally
+
+Docker BuildKit (`docker buildx`) can be used for building the images locally without any extra tooling. Following are examples of building the images for a single (host) architecture.
+
+
+For a multi-platform build or cross-compilation, use the `--platform` flag with the appropriate target platform. See the official Docker documentation on [multi-platform builds](https://docs.docker.com/build/building/multi-platform/) for more details.
+
+### Examples
+
+Alpine base using the default version from the Dockerfile:
+
+```bash
+docker buildx build -t base alpine/
+```
+
+To use a specific Alpine base version:
+
+```bash
+docker buildx build \
+  --build-arg ALPINE_VERSION=3.23 \
+  -t base:3.23 \
+  alpine/
+```
+
+Debian base:
+
+```bash
+docker buildx build \
+  --build-arg DEBIAN_VERSION=trixie
+  -t base-debian:trixie \
+  debian/
+```
+
+Ubuntu base:
+
+```bash
+docker buildx build \
+  --build-arg UBUNTU_VERSION=26.04 \
+  -t base-ubuntu:26.04 \
+  ubuntu/
+```
+
+Python 3.14 image, using the ApexOS Alpine 3.24 base image from GHCR:
+
+```bash
+docker buildx build \
+  --build-arg BASE_IMAGE=ghcr.io/apexinfosysindia/base \
+  --build-arg BASE_VERSION=3.24 \
+  -t base-python:3.14-alpine3.24 \
+  python/3.14/
+```
