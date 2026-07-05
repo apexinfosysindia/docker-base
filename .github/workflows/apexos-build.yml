@@ -1,0 +1,270 @@
+# =============================================================================
+# ApexOS base-image build — docker-base (build-pipeline owned).
+#
+# Installed in the product repo as .github/workflows/apexos-build.yml.
+# PIPELINE-OWNED SURFACE (`.github/workflows/apexos-*.yml`): never hand-edit
+# there — source of truth is build-pipeline tools/harness/ci/build/docker-base.yml.
+#
+# Variant matrix (proven locally, DOCKER-BASE-REPORT §7-8): alpine 3.23,
+# python 3.13 + 3.14 (on the freshly built alpine base), debian trixie,
+# ubuntu 26.04 — each on amd64 (ubuntu-latest) + arm64 (ubuntu-24.04-arm),
+# production Dockerfiles UNMODIFIED (the colima ADD --unpack localfixes do
+# not apply on GitHub runners). Every built image is denylist-gated
+# (tools/gate via BUILD_PIPELINE_TOKEN checkout) with violations==0 AND
+# skipped==0 asserted BEFORE any push. `image-gate` aggregates the matrix as
+# the required status check.
+#
+# Push (main only):
+#   ghcr.io/apexinfosysindia/<image>:<tag>[-<upstream calver>]  (GITHUB_TOKEN,
+#     packages:write) — the plugin fleet's pinned FROM
+#     ghcr.io/apexinfosysindia/base:3.23-2026.06.1 resolves from here;
+#   registry.apexinfosys.in/apexos/* mirror — continue-on-error while the
+#     box's token-server split is pending (blocked-on-box must not redden
+#     the gate).
+# Per-arch tags <tag>-<ver>-{amd64,aarch64} are pushed by the build legs;
+# the merge job stitches them into multi-arch manifests <tag> + <tag>-<ver>.
+# =============================================================================
+name: apexos-build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: apexos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GHCR_NS: ghcr.io/apexinfosysindia
+  REGISTRY: registry.apexinfosys.in
+  REGISTRY_NS: registry.apexinfosys.in/apexos
+  ALPINE_VERSION: "3.23"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.variant.name }} (${{ matrix.arch.name }})
+    runs-on: ${{ matrix.arch.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - name: amd64
+            runner: ubuntu-latest
+          - name: aarch64
+            runner: ubuntu-24.04-arm
+        variant:
+          - name: alpine
+            image: base
+            context: alpine
+            tag: "3.23"
+            args: ALPINE_VERSION=3.23
+            prebuild_alpine: false
+          - name: python3.13
+            image: base-python
+            context: python/3.13
+            tag: 3.13-alpine3.23
+            args: BASE_IMAGE=ghcr.io/apexinfosysindia/base BASE_VERSION=3.23
+            prebuild_alpine: true
+          - name: python3.14
+            image: base-python
+            context: python/3.14
+            tag: 3.14-alpine3.23
+            args: BASE_IMAGE=ghcr.io/apexinfosysindia/base BASE_VERSION=3.23
+            prebuild_alpine: true
+          - name: debian
+            image: base-debian
+            context: debian
+            tag: trixie
+            args: DEBIAN_VERSION=trixie
+            prebuild_alpine: false
+          - name: ubuntu
+            image: base-ubuntu
+            context: ubuntu
+            tag: "26.04"
+            args: UBUNTU_VERSION=26.04
+            prebuild_alpine: false
+    env:
+      IMAGE: ${{ matrix.variant.image }}
+      TAG: ${{ matrix.variant.tag }}
+      ARCH: ${{ matrix.arch.name }}
+    steps:
+      - name: checkout docker-base
+        uses: actions/checkout@v4
+        with:
+          path: src
+          persist-credentials: false
+
+      - name: checkout build-pipeline (gate tool + master map)
+        uses: actions/checkout@v4
+        with:
+          repository: apexinfosysindia/build-pipeline
+          ref: main
+          path: .build-pipeline
+          token: ${{ secrets.BUILD_PIPELINE_TOKEN }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: install gate deps
+        run: pip install pyyaml
+
+      - name: read upstream calver (.apexos/provenance.yaml)
+        id: version
+        run: |
+          v=$(python -c "import yaml; print(yaml.safe_load(open('src/.apexos/provenance.yaml'))['upstream']['ref'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: prebuild alpine base (python variants build FROM it locally)
+        if: matrix.variant.prebuild_alpine
+        run: |
+          docker build src/alpine \
+            --build-arg "ALPINE_VERSION=$ALPINE_VERSION" \
+            -t "$GHCR_NS/base:$ALPINE_VERSION"
+
+      - name: build ${{ matrix.variant.image }}:${{ matrix.variant.tag }} (production Dockerfile, unmodified)
+        env:
+          CONTEXT: ${{ matrix.variant.context }}
+          ARGS: ${{ matrix.variant.args }}
+        run: |
+          build_args=()
+          for a in $ARGS; do build_args+=(--build-arg "$a"); done
+          docker build "src/$CONTEXT" "${build_args[@]}" -t "$IMAGE:ci"
+
+      - name: gate built image (denylist, violations==0 && skipped==0)
+        working-directory: .build-pipeline/tools/gate
+        run: |
+          docker save "$IMAGE:ci" -o "$RUNNER_TEMP/image.tar"
+          rc=0
+          python -m apexos_gate --map ../../transform/rename-map.yaml --json "$RUNNER_TEMP/image.tar" \
+            > "$RUNNER_TEMP/gate.json" || rc=$?
+          python - "$RUNNER_TEMP/gate.json" "$rc" <<'PY'
+          import json, sys
+
+          gr = json.load(open(sys.argv[1]))
+          rc = int(sys.argv[2])
+          st = gr["stats"]
+          print(f"gate: exit={rc} violations={st['violations']} "
+                f"allowed={st['allowed']} skipped={st['skipped']} errors={st['errors']}")
+          for v in gr["violations"][:25]:
+              print(f"  VIOLATION {v.get('term')!r}: {v.get('path')}")
+          for s in gr["skipped"][:25]:
+              print(f"  SKIPPED {s.get('path')}: {s.get('reason')}")
+          # REQUIRED: clean gate AND zero skips (a skipped file is an unscanned file)
+          sys.exit(1 if rc != 0 or st["violations"] or st["skipped"] or st["errors"] else 0)
+          PY
+
+      - name: push per-arch image to ghcr (main only)
+        if: github.event_name != 'pull_request'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          ref="$GHCR_NS/$IMAGE:$TAG-$VERSION-$ARCH"
+          docker tag "$IMAGE:ci" "$ref"
+          docker push "$ref"
+
+      - name: push per-arch image to registry mirror (blocked-on-box tolerated)
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          if [ -z "$REGISTRY_PASSWORD" ]; then
+            echo "::warning::REGISTRY_PASSWORD not set — skipping registry push"
+            exit 1
+          fi
+          echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+          ref="$REGISTRY_NS/$IMAGE:$TAG-$VERSION-$ARCH"
+          docker tag "$IMAGE:ci" "$ref"
+          docker push "$ref"
+
+  image-gate:
+    name: image-gate
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: assert every variant/arch built and passed the denylist gate
+        env:
+          RESULT: ${{ needs.build.result }}
+        run: |
+          echo "build matrix result: $RESULT"
+          test "$RESULT" = "success"
+
+  merge:
+    name: publish multi-arch manifests
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: checkout docker-base (provenance only)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: read upstream calver
+        id: version
+        run: |
+          v=$(python3 -c "import yaml; print(yaml.safe_load(open('.apexos/provenance.yaml'))['upstream']['ref'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: create ghcr multi-arch manifests
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          publish() { # $1=image $2=tag
+            docker buildx imagetools create \
+              -t "$GHCR_NS/$1:$2" \
+              -t "$GHCR_NS/$1:$2-$VERSION" \
+              "$GHCR_NS/$1:$2-$VERSION-amd64" \
+              "$GHCR_NS/$1:$2-$VERSION-aarch64"
+          }
+          publish base 3.23
+          publish base-python 3.13-alpine3.23
+          publish base-python 3.14-alpine3.23
+          publish base-debian trixie
+          publish base-ubuntu 26.04
+
+      - name: create registry mirror manifests (blocked-on-box tolerated)
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          if [ -z "$REGISTRY_PASSWORD" ]; then
+            echo "::warning::REGISTRY_PASSWORD not set — skipping registry manifests"
+            exit 1
+          fi
+          echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+          publish() { # $1=image $2=tag
+            docker buildx imagetools create \
+              -t "$REGISTRY_NS/$1:$2" \
+              -t "$REGISTRY_NS/$1:$2-$VERSION" \
+              "$REGISTRY_NS/$1:$2-$VERSION-amd64" \
+              "$REGISTRY_NS/$1:$2-$VERSION-aarch64"
+          }
+          publish base 3.23
+          publish base-python 3.13-alpine3.23
+          publish base-python 3.14-alpine3.23
+          publish base-debian trixie
+          publish base-ubuntu 26.04
