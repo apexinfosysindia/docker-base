@@ -62,36 +62,49 @@ jobs:
           - name: aarch64
             runner: ubuntu-24.04-arm
         variant:
+          # container_builder: alpine/debian/ubuntu use `ADD --unpack=true`,
+          # which needs a newer BuildKit than the runner daemon's builtin
+          # frontend — build them in a docker-container buildx builder (the
+          # upstream-CI-equivalent path; DOCKER-BASE-REPORT §7's colima
+          # gotcha does not apply there) and --load into the daemon. The
+          # python Dockerfiles use plain ADD + tar (no --unpack) and MUST
+          # use the docker driver so their FROM resolves to the locally
+          # prebuilt alpine base, never the remote tag.
           - name: alpine
             image: base
             context: alpine
             tag: "3.23"
             args: ALPINE_VERSION=3.23
             prebuild_alpine: false
+            container_builder: true
           - name: python3.13
             image: base-python
             context: python/3.13
             tag: 3.13-alpine3.23
             args: BASE_IMAGE=ghcr.io/apexinfosysindia/base BASE_VERSION=3.23
             prebuild_alpine: true
+            container_builder: false
           - name: python3.14
             image: base-python
             context: python/3.14
             tag: 3.14-alpine3.23
             args: BASE_IMAGE=ghcr.io/apexinfosysindia/base BASE_VERSION=3.23
             prebuild_alpine: true
+            container_builder: false
           - name: debian
             image: base-debian
             context: debian
             tag: trixie
             args: DEBIAN_VERSION=trixie
             prebuild_alpine: false
+            container_builder: true
           - name: ubuntu
             image: base-ubuntu
             context: ubuntu
             tag: "26.04"
             args: UBUNTU_VERSION=26.04
             prebuild_alpine: false
+            container_builder: true
     env:
       IMAGE: ${{ matrix.variant.image }}
       TAG: ${{ matrix.variant.tag }}
@@ -125,10 +138,13 @@ jobs:
           v=$(python -c "import yaml; print(yaml.safe_load(open('src/.apexos/provenance.yaml'))['upstream']['ref'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
+      - name: create buildx container builder (ADD --unpack support)
+        run: docker buildx create --name apexos-ci --driver docker-container
+
       - name: prebuild alpine base (python variants build FROM it locally)
         if: matrix.variant.prebuild_alpine
         run: |
-          docker build src/alpine \
+          docker buildx build --builder apexos-ci --load src/alpine \
             --build-arg "ALPINE_VERSION=$ALPINE_VERSION" \
             -t "$GHCR_NS/base:$ALPINE_VERSION"
 
@@ -136,10 +152,13 @@ jobs:
         env:
           CONTEXT: ${{ matrix.variant.context }}
           ARGS: ${{ matrix.variant.args }}
+          CONTAINER_BUILDER: ${{ matrix.variant.container_builder }}
         run: |
           build_args=()
           for a in $ARGS; do build_args+=(--build-arg "$a"); done
-          docker build "src/$CONTEXT" "${build_args[@]}" -t "$IMAGE:ci"
+          builder_flag=()
+          if [ "$CONTAINER_BUILDER" = "true" ]; then builder_flag=(--builder apexos-ci); fi
+          docker buildx build "${builder_flag[@]}" --load "src/$CONTEXT" "${build_args[@]}" -t "$IMAGE:ci"
 
       - name: gate built image (denylist, violations==0 && skipped==0)
         working-directory: .build-pipeline/tools/gate
