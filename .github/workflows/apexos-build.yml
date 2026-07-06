@@ -49,6 +49,10 @@ permissions:
 jobs:
   build:
     name: ${{ matrix.variant.name }} (${{ matrix.arch.name }})
+    # dependabot's actor can't read org secrets (BUILD_PIPELINE_TOKEN,
+    # REGISTRY_*) — skip instead of failing red; image-gate skips in
+    # lockstep, and a skipped required check passes branch protection.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ${{ matrix.arch.runner }}
     permissions:
       contents: read
@@ -148,6 +152,10 @@ jobs:
             --build-arg "ALPINE_VERSION=$ALPINE_VERSION" \
             -t "$GHCR_NS/base:$ALPINE_VERSION"
 
+      # io.apexos.arch (upstream builder's io.hass.arch, transformed): the
+      # fleet's product images set it on their own build command too, but
+      # stamping the bases keeps parity with upstream's builder-labelled
+      # base images.
       - name: build ${{ matrix.variant.image }}:${{ matrix.variant.tag }} (production Dockerfile, unmodified)
         env:
           CONTEXT: ${{ matrix.variant.context }}
@@ -158,7 +166,7 @@ jobs:
           for a in $ARGS; do build_args+=(--build-arg "$a"); done
           builder_flag=()
           if [ "$CONTAINER_BUILDER" = "true" ]; then builder_flag=(--builder apexos-ci); fi
-          docker buildx build "${builder_flag[@]}" --load "src/$CONTEXT" "${build_args[@]}" -t "$IMAGE:ci"
+          docker buildx build "${builder_flag[@]}" --load "src/$CONTEXT" "${build_args[@]}" --label "io.apexos.arch=$ARCH" -t "$IMAGE:ci"
 
       - name: gate built image (denylist, violations==0 && skipped==0)
         working-directory: .build-pipeline/tools/gate
@@ -214,7 +222,10 @@ jobs:
   image-gate:
     name: image-gate
     needs: build
-    if: always()
+    # always() so a FAILED build still turns the gate red; the dependabot
+    # term skips the required check in lockstep with build (skipped counts
+    # as passing). Job name is the required-status-check — never rename.
+    if: always() && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: assert every variant/arch built and passed the denylist gate
