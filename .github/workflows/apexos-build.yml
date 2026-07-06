@@ -152,7 +152,7 @@ jobs:
             --build-arg "ALPINE_VERSION=$ALPINE_VERSION" \
             -t "$GHCR_NS/base:$ALPINE_VERSION"
 
-      # io.apexos.arch (upstream builder's io.hass.arch, transformed): the
+      # io.apexos.arch (the transformed upstream builder arch label): the
       # fleet's product images set it on their own build command too, but
       # stamping the bases keeps parity with upstream's builder-labelled
       # base images.
