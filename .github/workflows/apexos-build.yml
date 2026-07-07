@@ -22,7 +22,13 @@
 #     box's token-server split is pending (blocked-on-box must not redden
 #     the gate).
 # Per-arch tags <tag>-<ver>-{amd64,aarch64} are pushed by the build legs;
-# the merge job stitches them into multi-arch manifests <tag> + <tag>-<ver>.
+# the merge job stitches them into multi-arch manifests <tag> + <tag>-<ver>,
+# plus base:latest on ghcr ONLY (task #36): the Supervisor's local-addon
+# build path (apps/build.py) defaults BUILD_FROM to
+# ghcr.io/apexinfosysindia/base:latest when an addon's build.yaml lacks
+# build_from, and builds with `docker buildx build --pull` — so ghcr must
+# serve that tag or those addon builds die at runtime. Nothing consumes a
+# registry-mirror base:latest, so the mirror stays versioned-only.
 # =============================================================================
 name: apexos-build
 
@@ -261,14 +267,18 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          publish() { # $1=image $2=tag
-            docker buildx imagetools create \
-              -t "$GHCR_NS/$1:$2" \
-              -t "$GHCR_NS/$1:$2-$VERSION" \
+          publish() { # $1=image $2=tag [$3=floating alias, e.g. latest]
+            tags=(-t "$GHCR_NS/$1:$2" -t "$GHCR_NS/$1:$2-$VERSION")
+            if [ -n "${3:-}" ]; then tags+=(-t "$GHCR_NS/$1:$3"); fi
+            docker buildx imagetools create "${tags[@]}" \
               "$GHCR_NS/$1:$2-$VERSION-amd64" \
               "$GHCR_NS/$1:$2-$VERSION-aarch64"
           }
-          publish base 3.23
+          # base:latest is a RUNTIME contract (task #36): the Supervisor's
+          # apps/build.py falls back to BUILD_FROM=ghcr.io/.../base:latest
+          # for local addons whose build.yaml lacks build_from and builds
+          # with --pull — ghcr must serve it.
+          publish base 3.23 latest
           publish base-python 3.13-alpine3.23
           publish base-python 3.14-alpine3.23
           publish base-debian trixie
