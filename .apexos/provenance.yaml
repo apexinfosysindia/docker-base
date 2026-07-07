@@ -16,10 +16,10 @@ upstream:
 apexos:
   version: 0.1.1-dev
   channel: dev
-packaged: '2026-07-05'
+packaged: '2026-07-07'
 build_pipeline:
   org: apexinfosysindia
-  commit: afa0da3d0264f95c1ab5a5584cddb8e08ddf220c
+  commit: 09b0fbb1bf725f2583b65aff005306ce13012cde
 engine: python
 src_subdir: .
 patches: []
