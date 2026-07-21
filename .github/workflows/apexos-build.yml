@@ -121,13 +121,13 @@ jobs:
       ARCH: ${{ matrix.arch.name }}
     steps:
       - name: checkout docker-base
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: src
           persist-credentials: false
 
       - name: checkout build-pipeline (gate tool + master map)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: apexinfosysindia/build-pipeline
           ref: main
@@ -251,7 +251,7 @@ jobs:
       packages: write
     steps:
       - name: checkout docker-base (provenance only)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
