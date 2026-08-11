@@ -7,7 +7,7 @@
 #
 # Variant matrix (proven locally, DOCKER-BASE-REPORT §7-8): alpine 3.23,
 # python 3.13 + 3.14 (on the freshly built alpine base), debian trixie,
-# ubuntu 26.04 — each on amd64 (self-hosted) + arm64 (self-hosted (ARM64)),
+# ubuntu 26.04 — each on amd64 + arm64 (self-hosted apexos-builder, arch-routed by label),
 # production Dockerfiles UNMODIFIED (the colima ADD --unpack localfixes do
 # not apply on GitHub runners). Every built image is denylist-gated
 # (tools/gate via BUILD_PIPELINE_TOKEN checkout) with violations==0 AND
@@ -121,21 +121,40 @@ jobs:
       ARCH: ${{ matrix.arch.name }}
     steps:
       - name: checkout docker-base
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           path: src
           persist-credentials: false
 
       - name: checkout build-pipeline (gate tool + master map)
-        uses: actions/checkout@v4
-        with:
-          repository: apexinfosysindia/build-pipeline
-          ref: main
-          path: .build-pipeline
-          token: ${{ secrets.BUILD_PIPELINE_TOKEN }}
-          persist-credentials: false
+        # BUILD_PIPELINE_TOKEN is an ed25519 SSH deploy key (READ-ONLY on
+        # build-pipeline), NOT a PAT — actions/checkout `token:` cannot consume
+        # it. Stored double-base64 so the secret survives newline mangling.
+        env:
+          BUILD_PIPELINE_KEY_B64: ${{ secrets.BUILD_PIPELINE_TOKEN }}
+        run: |
+          key_file=$(mktemp)
+          chmod 600 "$key_file"
+          echo "$BUILD_PIPELINE_KEY_B64" | base64 -d | base64 -d > "$key_file"
+          GIT_SSH_COMMAND="ssh -i $key_file -o StrictHostKeyChecking=accept-new" \
+            git clone --depth=1 git@github.com:apexinfosysindia/build-pipeline.git .build-pipeline
+          rm -f "$key_file"
 
-      - uses: actions/setup-python@v5
+      # self-hosted runners: RUNNER_TOOL_CACHE is unset on our builders, and
+      # setup-python then falls back to the nonexistent
+      # /Users/runner/hostedtoolcache (the macOS builder runs as 'advait', and
+      # there is no 'runner' user). $HOME is only real inside a shell -- the
+      # `env` context has no HOME entry, so this CANNOT be an `env:` value:
+      # format('{0}/hostedtoolcache', env.HOME) silently yields
+      # /hostedtoolcache, an unwritable root path, and the tool install fails.
+      - name: ensure python tool cache path (self-hosted runners)
+        run: |
+          cache="$RUNNER_TOOL_CACHE"
+          if [ -z "$cache" ]; then cache="$HOME/hostedtoolcache"; fi
+          mkdir -p "$cache"
+          echo "RUNNER_TOOL_CACHE=$cache" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
@@ -251,7 +270,7 @@ jobs:
       packages: write
     steps:
       - name: checkout docker-base (provenance only)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
