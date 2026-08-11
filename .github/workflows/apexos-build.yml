@@ -7,7 +7,7 @@
 #
 # Variant matrix (proven locally, DOCKER-BASE-REPORT §7-8): alpine 3.23,
 # python 3.13 + 3.14 (on the freshly built alpine base), debian trixie,
-# ubuntu 26.04 — each on amd64 (ubuntu-latest) + arm64 (ubuntu-24.04-arm),
+# ubuntu 26.04 — each on amd64 (self-hosted) + arm64 (self-hosted (ARM64)),
 # production Dockerfiles UNMODIFIED (the colima ADD --unpack localfixes do
 # not apply on GitHub runners). Every built image is denylist-gated
 # (tools/gate via BUILD_PIPELINE_TOKEN checkout) with violations==0 AND
@@ -68,9 +68,9 @@ jobs:
       matrix:
         arch:
           - name: amd64
-            runner: ubuntu-latest
+            runner: [self-hosted, apexos-builder, linux, X64]
           - name: aarch64
-            runner: ubuntu-24.04-arm
+            runner: [self-hosted, apexos-builder, ARM64]
         variant:
           # container_builder: alpine/debian/ubuntu use `ADD --unpack=true`,
           # which needs a newer BuildKit than the runner daemon's builtin
@@ -232,7 +232,7 @@ jobs:
     # term skips the required check in lockstep with build (skipped counts
     # as passing). Job name is the required-status-check — never rename.
     if: always() && github.actor != 'dependabot[bot]'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, apexos-builder]
     steps:
       - name: assert every variant/arch built and passed the denylist gate
         env:
@@ -245,7 +245,7 @@ jobs:
     name: publish multi-arch manifests
     needs: build
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, apexos-builder]
     permissions:
       contents: read
       packages: write
