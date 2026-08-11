@@ -195,8 +195,26 @@ jobs:
           v=$(python -c "import yaml; print(yaml.safe_load(open('src/.apexos/provenance.yaml'))['upstream']['ref'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
+      # Create the builder only when it is MISSING. On a self-hosted runner the
+      # Docker daemon is shared across jobs, so a named builder left behind by
+      # a previous -- or concurrently running -- matrix leg is already there,
+      # and a bare `docker buildx create --name apexos-ci` dies with
+      # `ERROR: existing instance for "apexos-ci" but no append mode, specify
+      # the node name to make changes for existing instances` (proven live:
+      # docker-base run 31541384904, job `ubuntu (amd64)`). Hosted runners never
+      # hit this because every job got a fresh VM.
+      #
+      # Reuse is safe and desirable: buildkit serves concurrent builds from
+      # several jobs, and sharing the instance shares its build cache. The
+      # builds below all pass `--builder apexos-ci` explicitly, so no `--use`.
+      # The trailing inspect absorbs the create/create race when two legs both
+      # observe it missing at the same moment -- whoever loses still ends up
+      # with a usable builder, so the step must not fail.
       - name: create buildx container builder (ADD --unpack support)
-        run: docker buildx create --name apexos-ci --driver docker-container
+        run: |
+          docker buildx inspect apexos-ci >/dev/null 2>&1 \
+            || docker buildx create --name apexos-ci --driver docker-container \
+            || docker buildx inspect apexos-ci >/dev/null
 
       - name: prebuild alpine base (python variants build FROM it locally)
         if: matrix.variant.prebuild_alpine
