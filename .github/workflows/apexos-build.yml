@@ -195,6 +195,31 @@ jobs:
           v=$(python -c "import yaml; print(yaml.safe_load(open('src/.apexos/provenance.yaml'))['upstream']['ref'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
+      # Refresh the ghcr credential BEFORE any build, not just before the
+      # pushes below. The python Dockerfiles inherit config with a second
+      # `FROM ${BUILD_FROM}` = ghcr.io/apexinfosysindia/base:3.23, and BuildKit
+      # resolves that ref's metadata from the REGISTRY even though the previous
+      # step just --loaded that exact tag into the local daemon -- so every
+      # python leg makes a ghcr token request whether or not it needs to pull.
+      #
+      # On a self-hosted runner ~/.docker/config.json is shared by every job,
+      # and a GITHUB_TOKEN dies with the job that minted it. A leftover ghcr
+      # entry therefore makes BuildKit present an EXPIRED credential, and ghcr
+      # answers 403 rather than falling back to anonymous -- so the leg fails
+      # even for a package it could have read with no credential at all (proven
+      # live: run 31545974467, `python3.13 (amd64)` + `python3.14 (amd64)`,
+      # `failed to fetch oauth token: ... 403 Forbidden` on
+      # `scope=repository:apexinfosysindia/base:pull`; the aarch64 legs passed
+      # because that builder carried no stale entry). Clearing the file by hand
+      # only holds until the next job re-staleses it; logging in per-job is the
+      # durable fix. The other build templates already refresh the credential
+      # in their `ensure base image locally` step -- this is the one job that
+      # builds FROM ghcr without pulling first.
+      - name: refresh ghcr credential (BuildKit resolves FROM via the registry)
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
       # Create the builder only when it is MISSING. On a self-hosted runner the
       # Docker daemon is shared across jobs, so a named builder left behind by
       # a previous -- or concurrently running -- matrix leg is already there,
