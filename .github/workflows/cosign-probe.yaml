@@ -1,5 +1,5 @@
 name: cosign-probe
-on: workflow_dispatch
+on: [pull_request, workflow_dispatch]
 jobs:
   probe:
     runs-on: [self-hosted, apexos-builder, linux, X64]
