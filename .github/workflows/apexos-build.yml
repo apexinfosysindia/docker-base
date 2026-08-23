@@ -63,6 +63,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write # for keyless cosign signing (Sigstore/Fulcio via OIDC)
     strategy:
       fail-fast: false
       matrix:
@@ -387,6 +388,10 @@ jobs:
           sys.exit(1 if rc != 0 or st["violations"] or st["skipped"] or st["errors"] else 0)
           PY
 
+      - name: install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+
       - name: push per-arch image to ghcr (main only)
         if: github.event_name != 'pull_request'
         env:
@@ -404,6 +409,12 @@ jobs:
           else
             docker tag "$IMAGE:ci" "$ref"
             docker push "$ref"
+            # Keyless signing (Sigstore/Fulcio via this job's OIDC token, no
+            # key management). The digest gets recorded in the public Rekor
+            # transparency log — that only proves "this specific hash was
+            # signed by this GitHub Actions run," it reveals nothing about
+            # the (private) image contents.
+            cosign sign --yes "$ref" || echo "::warning::cosign sign failed for $ref"
           fi
 
       - name: push per-arch image to registry mirror (blocked-on-box tolerated)
@@ -425,6 +436,7 @@ jobs:
           else
             docker tag "$IMAGE:ci" "$ref"
             docker push "$ref"
+            cosign sign --yes "$ref" || echo "::warning::cosign sign failed for $ref"
           fi
 
       # Every `docker login` in this job writes its credential into
