@@ -395,8 +395,16 @@ jobs:
         run: |
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           ref="$GHCR_NS/$IMAGE:$TAG-$VERSION-$ARCH"
-          docker tag "$IMAGE:ci" "$ref"
-          docker push "$ref"
+          # VERSION is a stable pin (.apexos/provenance.yaml), not a per-build
+          # timestamp — every push to main rebuilds under the SAME tag. An
+          # unrelated Dockerfile/CI change that doesn't bump the pin must not
+          # silently overwrite an already-shipped tag with different bytes.
+          if docker manifest inspect "$ref" > /dev/null 2>&1; then
+            echo "::warning::$ref already exists — bump .apexos/provenance.yaml to republish. Skipping push."
+          else
+            docker tag "$IMAGE:ci" "$ref"
+            docker push "$ref"
+          fi
 
       - name: push per-arch image to registry mirror (blocked-on-box tolerated)
         if: github.event_name != 'pull_request'
@@ -412,8 +420,12 @@ jobs:
           fi
           echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
           ref="$REGISTRY_NS/$IMAGE:$TAG-$VERSION-$ARCH"
-          docker tag "$IMAGE:ci" "$ref"
-          docker push "$ref"
+          if docker manifest inspect "$ref" > /dev/null 2>&1; then
+            echo "::warning::$ref already exists — bump .apexos/provenance.yaml to republish. Skipping push."
+          else
+            docker tag "$IMAGE:ci" "$ref"
+            docker push "$ref"
+          fi
 
       # Every `docker login` in this job writes its credential into
       # ~/.docker/config.json, and these runners' home directories are SHARED
