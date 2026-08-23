@@ -1,0 +1,27 @@
+name: cosign-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: [self-hosted, apexos-builder, linux, X64]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: install cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+      - name: push + sign throwaway probe image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          ref="ghcr.io/apexinfosysindia/cosign-probe:$GITHUB_RUN_ID"
+          docker pull alpine:3.20
+          docker tag alpine:3.20 "$ref"
+          docker push "$ref"
+          echo "=== signing ==="
+          cosign sign --yes "$ref"
+          echo "=== verifying ==="
+          cosign verify "$ref" \
+            --certificate-identity-regexp "https://github.com/apexinfosysindia/docker-base/.github/workflows/cosign-probe.yml@.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
