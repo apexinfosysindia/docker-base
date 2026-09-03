@@ -88,6 +88,16 @@ jobs:
             args: ALPINE_VERSION=3.23
             prebuild_alpine: false
             container_builder: true
+          # 3.24 flavour (2026-09-03): the 2026.08.0 plugin images build FROM
+          # base:3.24-<calver>; the source line's matrix is 3.22/3.23/3.24 and
+          # this repo only published 3.23. Same Dockerfile, different ALPINE_VERSION.
+          - name: alpine3.24
+            image: base
+            context: alpine
+            tag: "3.24"
+            args: ALPINE_VERSION=3.24
+            prebuild_alpine: false
+            container_builder: true
           - name: python3.13
             image: base-python
             context: python/3.13
