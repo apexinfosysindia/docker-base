@@ -5,8 +5,8 @@
 # PIPELINE-OWNED SURFACE (`.github/workflows/apexos-*.yml`): never hand-edit
 # there — source of truth is build-pipeline tools/harness/ci/build/docker-base.yml.
 #
-# Variant matrix (proven locally, DOCKER-BASE-REPORT §7-8): alpine 3.23,
-# python 3.13 + 3.14 (on the freshly built alpine base), debian trixie,
+# Variant matrix (proven locally, DOCKER-BASE-REPORT §7-8): alpine 3.23 +
+# 3.24, python 3.13 + 3.14 (on the freshly built alpine 3.23 base), debian trixie,
 # ubuntu 26.04 — each on amd64 + arm64 (self-hosted apexos-builder, arch-routed by label),
 # production Dockerfiles UNMODIFIED (the colima ADD --unpack localfixes do
 # not apply on GitHub runners). Every built image is denylist-gated
@@ -17,12 +17,16 @@
 # Push (main only):
 #   ghcr.io/apexinfosysindia/<image>:<tag>[-<upstream calver>]  (GITHUB_TOKEN,
 #     packages:write) — the plugin fleet's pinned FROM
-#     ghcr.io/apexinfosysindia/base:3.23-2026.06.1 resolves from here;
+#     ghcr.io/apexinfosysindia/base:3.24-2026.06.1 resolves from here;
 #   registry.apexinfosys.in/apexos/* mirror — continue-on-error while the
 #     box's token-server split is pending (blocked-on-box must not redden
 #     the gate).
 # Per-arch tags <tag>-<ver>-{amd64,aarch64} are pushed by the build legs;
-# the merge job stitches them into multi-arch manifests <tag> + <tag>-<ver>,
+# the merge job stitches them into multi-arch manifests <tag> + <tag>-<ver>
+# for EVERY variant in the build matrix — it reads the list back from this
+# file, so a new flavour is one matrix entry and nothing else (the list was
+# hand-maintained until 2026-09-04 and the 3.24 flavour shipped per-arch
+# only, unresolvable by the plugins' FROM — pre-landing audit A2) —
 # plus base:latest on ghcr ONLY (task #36): the Supervisor's local-addon
 # build path (apps/build.py) defaults BUILD_FROM to
 # ghcr.io/apexinfosysindia/base:latest when an addon's build.yaml lacks
@@ -91,6 +95,8 @@ jobs:
           # 3.24 flavour (2026-09-03): the 2026.08.0 plugin images build FROM
           # base:3.24-<calver>; the source line's matrix is 3.22/3.23/3.24 and
           # this repo only published 3.23. Same Dockerfile, different ALPINE_VERSION.
+          # The merge job derives its manifest list from these entries (image +
+          # tag), so the multi-arch manifest follows automatically.
           - name: alpine3.24
             image: base
             context: alpine
@@ -527,6 +533,28 @@ jobs:
           v=$(python3 -c "import yaml; print(yaml.safe_load(open('.apexos/provenance.yaml'))['upstream']['ref'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
+      # The manifest list is the build matrix, read back from THIS workflow
+      # file (jobs.build.strategy.matrix.variant -> "<image> <tag>" per line),
+      # so a flavour added above gets its multi-arch manifest with no second
+      # edit here. It used to be a hand-maintained list and drifted the first
+      # time the matrix grew: the alpine 3.24 flavour (2026-09-03) shipped
+      # per-arch tags only, and the plugin fleet's FROM base:3.24-2026.06.1
+      # could not resolve (pre-landing audit 2026-09-04, A2).
+      # GITHUB_WORKFLOW_REF is "<owner>/<repo>/<path>@<ref>" — the path of
+      # this very file in the checkout, whatever the product repo named it.
+      - name: resolve the manifest list from the build matrix
+        run: |
+          wf="${GITHUB_WORKFLOW_REF#*/*/}"; wf="${wf%@*}"
+          python3 - "$wf" <<'PY' > "$RUNNER_TEMP/variants"
+          import sys, yaml
+          doc = yaml.safe_load(open(sys.argv[1]))
+          for v in doc["jobs"]["build"]["strategy"]["matrix"]["variant"]:
+              print(v["image"], v["tag"])
+          PY
+          test -s "$RUNNER_TEMP/variants"
+          echo "manifests to publish (from $wf):"
+          cat "$RUNNER_TEMP/variants"
+
       - name: create ghcr multi-arch manifests
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -540,15 +568,18 @@ jobs:
               "$GHCR_NS/$1:$2-$VERSION-amd64" \
               "$GHCR_NS/$1:$2-$VERSION-aarch64"
           }
+          # fd 3, not stdin: nothing docker spawns can eat the rest of the list.
+          while read -r -u 3 image tag; do
+            publish "$image" "$tag"
+          done 3< "$RUNNER_TEMP/variants"
           # base:latest is a RUNTIME contract (task #36): the Supervisor's
           # apps/build.py falls back to BUILD_FROM=ghcr.io/.../base:latest
           # for local addons whose build.yaml lacks build_from and builds
-          # with --pull — ghcr must serve it.
+          # with --pull — ghcr must serve it. WHICH alpine flavour carries
+          # the alias is a deliberate choice, not something to derive from
+          # the matrix, so it stays spelled out here; re-creating base:3.23's
+          # list from the same per-arch sources is an idempotent write.
           publish base 3.23 latest
-          publish base-python 3.13-alpine3.23
-          publish base-python 3.14-alpine3.23
-          publish base-debian trixie
-          publish base-ubuntu 26.04
 
       - name: create registry mirror manifests (blocked-on-box tolerated)
         continue-on-error: true
@@ -569,11 +600,11 @@ jobs:
               "$REGISTRY_NS/$1:$2-$VERSION-amd64" \
               "$REGISTRY_NS/$1:$2-$VERSION-aarch64"
           }
-          publish base 3.23
-          publish base-python 3.13-alpine3.23
-          publish base-python 3.14-alpine3.23
-          publish base-debian trixie
-          publish base-ubuntu 26.04
+          # Same matrix-derived list as the ghcr step; versioned tags only,
+          # no floating alias — nothing consumes one from the mirror.
+          while read -r -u 3 image tag; do
+            publish "$image" "$tag"
+          done 3< "$RUNNER_TEMP/variants"
 
       # Every `docker login` in this job writes its credential into
       # ~/.docker/config.json, and these runners' home directories are SHARED
