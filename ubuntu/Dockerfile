@@ -11,10 +11,10 @@ ENV \
 SHELL ["/bin/bash", "-o", "pipefail", "-x", "-c"]
 
 ARG BASHIO_REPOSITORY=apexinfosysindia/bashio
-ARG BASHIO_VERSION=0.17.5
+ARG BASHIO_VERSION=0.19.0
 ARG S6_OVERLAY_ARCH
 ARG S6_OVERLAY_REPOSITORY=just-containers/s6-overlay
-ARG S6_OVERLAY_VERSION=3.2.3.0
+ARG S6_OVERLAY_VERSION=3.2.3.2
 ARG TEMPIO_ARCH
 ARG TEMPIO_REPOSITORY=apexinfosysindia/tempio
 ARG TEMPIO_VERSION=2026.07.0
@@ -34,7 +34,9 @@ RUN \
 RUN \
     --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         bash \
         jq \
         tzdata \

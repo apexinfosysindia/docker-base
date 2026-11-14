@@ -11,15 +11,15 @@ schema_version: 1
 repo: docker-base
 upstream:
   url: https://github.com/home-assistant/docker-base
-  ref: 2026.08.0
-  sha: 6a3ff4c10f6ed8564a092c33051024a1b1042ee2
+  ref: 2026.10.1
+  sha: 7a8d988a93cc7029b3ef091be6faaf2f9cb666b9
 apexos:
   version: 0.1.1-dev
   channel: dev
-packaged: '2026-09-13'
+packaged: '2026-11-15'
 build_pipeline:
   org: apexinfosysindia
-  commit: c232050e651e434a4caee51a71a7e9ed281c25e3
+  commit: 4098d29758ea6659efea2083b088f1b774dc9e90
 engine: python
 src_subdir: .
 patches: []
