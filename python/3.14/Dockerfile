@@ -8,7 +8,7 @@ ARG BUILD_FROM=${BASE_IMAGE}:${BASE_VERSION}
 
 FROM ${BUILD_FROM} AS python-source
 
-ARG PYTHON_VERSION=3.14.7
+ARG PYTHON_VERSION=3.14.9
 ARG CERT_IDENTITY=hugo@python.org
 ARG CERT_OIDC_ISSUER=https://github.com/login/oauth
 
@@ -136,7 +136,7 @@ RUN \
     && ln -s python3-config python-config
 
 # Install pip
-ARG PIP_VERSION=26.0.1
+ARG PIP_VERSION=26.2.2
 
 RUN \
     --mount=type=cache,target=/root/.cache/pip,sharing=locked \
