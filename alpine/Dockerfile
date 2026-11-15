@@ -12,7 +12,7 @@ ENV LANG="C.UTF-8"
 
 SHELL ["/bin/ash", "-o", "pipefail", "-x", "-c"]
 
-ARG JEMALLOC_VERSION=5.3.1
+ARG JEMALLOC_VERSION=5.4.0
 
 WORKDIR /usr/src/jemalloc
 
@@ -42,10 +42,10 @@ ENV LANG="C.UTF-8"
 SHELL ["/bin/ash", "-o", "pipefail", "-x", "-c"]
 
 ARG BASHIO_REPOSITORY=apexinfosysindia/bashio
-ARG BASHIO_VERSION=0.17.5
+ARG BASHIO_VERSION=0.19.0
 ARG S6_OVERLAY_ARCH
 ARG S6_OVERLAY_REPOSITORY=just-containers/s6-overlay
-ARG S6_OVERLAY_VERSION=3.2.3.0
+ARG S6_OVERLAY_VERSION=3.2.3.2
 ARG TEMPIO_ARCH
 ARG TEMPIO_REPOSITORY=apexinfosysindia/tempio
 ARG TEMPIO_VERSION=2026.07.0
@@ -63,7 +63,8 @@ COPY --link --from=jemalloc-build / /
 # Base system packages
 RUN \
     --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    apk add --update-cache \
+    apk upgrade --update-cache \
+    && apk add \
         bash \
         bind-tools \
         ca-certificates \

@@ -6,7 +6,8 @@
 # there — source of truth is build-pipeline tools/harness/ci/build/docker-base.yml.
 #
 # Variant matrix (proven locally, DOCKER-BASE-REPORT §7-8): alpine 3.23 +
-# 3.24, python 3.13 + 3.14 (on the freshly built alpine 3.23 base), debian trixie,
+# 3.24, python 3.13 + 3.14 (on the freshly built alpine 3.23 base) + 3.14 on alpine
+# 3.24 (since 2026-11-15, the base upstream builds core-base/supervisor on), debian trixie,
 # ubuntu 26.04 — each on amd64 + arm64 (self-hosted apexos-builder, arch-routed by label),
 # production Dockerfiles UNMODIFIED (the colima ADD --unpack localfixes do
 # not apply on GitHub runners). Every built image is denylist-gated
@@ -51,7 +52,6 @@ env:
   GHCR_NS: ghcr.io/apexinfosysindia
   REGISTRY: registry.apexinfosys.in
   REGISTRY_NS: registry.apexinfosys.in/apexos
-  ALPINE_VERSION: "3.23"
 
 permissions:
   contents: read
@@ -109,14 +109,26 @@ jobs:
             context: python/3.13
             tag: 3.13-alpine3.23
             args: BASE_IMAGE=ghcr.io/apexinfosysindia/base BASE_VERSION=3.23
-            prebuild_alpine: true
+            prebuild_alpine: "3.23"
             container_builder: false
           - name: python3.14
             image: base-python
             context: python/3.14
             tag: 3.14-alpine3.23
             args: BASE_IMAGE=ghcr.io/apexinfosysindia/base BASE_VERSION=3.23
-            prebuild_alpine: true
+            prebuild_alpine: "3.23"
+            container_builder: false
+          # 3.24 python flavour (2026-11-15): upstream builds core-base and
+          # supervisor FROM base-python:3.14-alpine3.24-<calver>, and that is
+          # the combination it tests, so the fork follows it. prebuild_alpine
+          # names the alpine base the leg builds locally first (BASE_VERSION
+          # must match it).
+          - name: python3.14-alpine3.24
+            image: base-python
+            context: python/3.14
+            tag: 3.14-alpine3.24
+            args: BASE_IMAGE=ghcr.io/apexinfosysindia/base BASE_VERSION=3.24
+            prebuild_alpine: "3.24"
             container_builder: false
           - name: debian
             image: base-debian
@@ -371,12 +383,16 @@ jobs:
             || docker buildx create --name apexos-ci --driver docker-container \
             || docker buildx inspect apexos-ci >/dev/null
 
+      # prebuild_alpine is false or the alpine version string the python
+      # leg's BASE_VERSION names (a non-empty string is truthy for `if:`).
       - name: prebuild alpine base (python variants build FROM it locally)
         if: matrix.variant.prebuild_alpine
+        env:
+          PREBUILD_ALPINE: ${{ matrix.variant.prebuild_alpine }}
         run: |
           docker buildx build --builder apexos-ci --load src/alpine \
-            --build-arg "ALPINE_VERSION=$ALPINE_VERSION" \
-            -t "$GHCR_NS/base:$ALPINE_VERSION"
+            --build-arg "ALPINE_VERSION=$PREBUILD_ALPINE" \
+            -t "$GHCR_NS/base:$PREBUILD_ALPINE"
 
       # io.apexos.arch (the transformed upstream builder arch label): the
       # fleet's product images set it on their own build command too, but
