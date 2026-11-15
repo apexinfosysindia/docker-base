@@ -11,8 +11,8 @@ schema_version: 1
 repo: docker-base
 upstream:
   url: https://github.com/home-assistant/docker-base
-  ref: 2026.10.3
-  sha: aac55b5055f542a99d99f8bb9872fbe01de427e2
+  ref: 2026.11.0
+  sha: 7d9ba088153e553eb364a586bd9c6f814e19166c
 apexos:
   version: 0.1.1-dev
   channel: dev
